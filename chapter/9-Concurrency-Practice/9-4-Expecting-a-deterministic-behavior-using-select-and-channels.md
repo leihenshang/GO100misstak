@@ -65,7 +65,7 @@ disconnection, return
 如果我们遇到有多个生产者 goroutine 的情况，可能无法保证哪个先写。因此，无论是无缓冲的 `messageCh` 通道还是单个通道，都会导致生产者 goroutine 之间的竞争条件。在这种情况下，我们可以实现以下解决方案:
 
 * 从 `messageCh` 或 `disconnectCh` 接收
-* 如果收到端口连接：
+* 如果收到 来自 `disconnectCh` 通道的消息 ：
     - 接收 `messageCh` 中的所有现有消息（如果有）
     - 然后返回
 
@@ -119,3 +119,193 @@ for {
 当对多个通道使用 `select` 时，我们必须记住，如果可能有多个选项，则不是源顺序中的第一种情况会获胜。相反，Go 会随机选择它，因此无法保证会选择哪一个。为了克服这种行为，在单个生产者 goroutine 的情况下，我们可以使用无缓冲通道或使用单个通道。在多个生产者 goroutine 的情况下，我们可以使用内部选择和 `default` 值来处理优先级。
 
 以下部分将讨论一种常见的通道类型：通知通道。
+
+错误示范：
+
+```go
+package main
+
+  
+
+import (
+
+    "fmt"
+
+    "time"
+
+)
+
+  
+
+var ch1 = make(chan int, 10)
+
+var discountCh1 = make(chan int)
+
+  
+
+func main() {
+
+  
+
+    go func() {
+
+        for {
+
+            select {
+
+            case v := <-ch1:
+
+                time.Sleep(time.Millisecond * 500)
+
+                fmt.Println("ch1", v)
+
+            case <-discountCh1:
+
+                fmt.Println("discountCh1")
+
+                return
+
+            }
+
+        }
+
+    }()
+
+  
+
+    go func() {
+
+        for i := 0; i < 10; i++ {
+
+            ch1 <- i
+
+        }
+
+        fmt.Println("send values to chan1 is completed")
+
+    }()
+
+  
+
+    go func() {
+
+        time.Sleep(time.Second * 3)
+
+        discountCh1 <- 1
+
+    }()
+
+  
+
+    time.Sleep(time.Second * 5)
+
+    fmt.Println("the end")
+
+}
+```
+
+如何修复？
+```go
+package main
+
+  
+
+import (
+
+    "fmt"
+
+    "time"
+
+)
+
+  
+
+var ch1 = make(chan int, 10)
+
+var discountCh1 = make(chan int)
+
+  
+
+func main() {
+
+  
+
+    go func() {
+
+        for {
+
+            select {
+
+            case v := <-ch1:
+
+                time.Sleep(time.Millisecond * 500)
+
+                fmt.Println("ch1", v)
+
+            case <-discountCh1:
+
+                fmt.Println("discountCh1")
+
+                for {
+
+                    select {
+
+                    case v := <-ch1:
+
+                        time.Sleep(time.Millisecond * 500)
+
+                        fmt.Println("ch1 in the disconnect", v)
+
+                    default:
+
+                        fmt.Println("disconnect default")
+
+                        return
+
+                    }
+
+                }
+
+  
+
+            }
+
+        }
+
+    }()
+
+  
+
+    go func() {
+
+        var i = 0
+
+        for ; i < 10; i++ {
+
+            ch1 <- i
+
+        }
+
+        fmt.Println("send values to chan1 is completed", i)
+
+    }()
+
+  
+
+    go func() {
+
+        time.Sleep(time.Second * 3)
+
+        discountCh1 <- 1
+
+    }()
+
+  
+
+    time.Sleep(time.Second * 10)
+
+    fmt.Println("the end")
+
+}
+
+```
